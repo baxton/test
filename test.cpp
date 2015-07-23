@@ -58,7 +58,7 @@ unsigned int stoui(const char* p, size_t size) {
         res += (*p - '0');
     }
 
-    if (res > 4294967295)
+    if (res > 4294967295u)
         throw runtime_error("invalid uint value is out of range");
 
     return (unsigned int)res;    
