@@ -23,7 +23,7 @@
 typedef double value_t;
 
 
-namespace random {
+namespace rnd {
 
     void seed() { ::srand(time(NULL)); }
 
@@ -51,6 +51,38 @@ void mul_and_add(value_t scalar, const value_t* v, value_t* r, int size) {
     }
 }
 
+
+}
+
+
+namespace stat {
+
+void get_stat_online(const value_t* vec, size_t size, value_t& m, value_t& v, value_t& s, value_t& k) {
+    value_t n, M1, M2, M3, M4;
+    double delta, delta_n, delta_n2, term1;
+
+    // init
+    n = 0.;
+    M1 = M2 = M3 = M4 = 0.;
+
+    for (size_t i = 0; i < size; ++i) { 
+        value_t n1 = n;
+        n++;
+        delta = vec[i] - M1;
+        delta_n = delta / n;
+        delta_n2 = delta_n * delta_n;
+        term1 = delta * delta_n * n1;
+        M1 += delta_n;
+        M4 += term1 * delta_n2 * (n*n - 3*n + 3) + 6 * delta_n2 * M2 - 4 * delta_n * M3;
+        M3 += term1 * delta_n * (n - 2) - 3 * delta_n * M2;
+        M2 += term1;
+    }
+
+    m = M1;
+    v = M2 / (n - 1.0);
+    s = ::sqrt(n) * M3 / ::pow(M2, 1.5);
+    k = n * M4 / (M2 * M2) - 3.0;
+}
 
 }
 
@@ -148,7 +180,7 @@ public:
         columns(0),
         theta()
     {
-        random::seed();
+        rnd::seed();
     }
     ~QuakePredictor() {}
 
@@ -187,7 +219,7 @@ public:
         // init classifier
         columns = 1 + 1 + 4;
         for (size_t i = 0; i < columns; ++i)
-            theta.push_back(random::rand());
+            theta.push_back(rnd::rand());
 
         return 0;
     }
@@ -269,12 +301,26 @@ void test3() {
 }
 
 
+void test4() {
+
+    value_t a[] = {1,2,3,4,5,6,7,8,9,0};
+    size_t size = sizeof(a) / sizeof(value_t);
+
+
+    value_t m, v, s, k;
+
+    stat::get_stat_online(a, size, m, v, s, k);
+
+    std::cout << "MVSK: " << m << "\t" << v << "\t" << s << "\t" << k << std::endl;
+}
+
 
 int main() {
 
     test();
     test2();
     test3();
+    test4();
 
 
     return 0;
