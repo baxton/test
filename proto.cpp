@@ -62,21 +62,20 @@ namespace stat {
 template<typename T>
 void get_stat_online(const T* vec, size_t size, value_t& m, value_t& v, value_t& s, value_t& k) {
     value_t n, M1, M2, M3, M4;
-    double delta, delta_n, delta_n2, term1;
+    value_t delta, delta_n, delta_n2, term1;
 
     // init
-    n = 0.;
-    M1 = M2 = M3 = M4 = 0.;
+    n = M1 = M2 = M3 = M4 = 0.;
 
+    // process
     for (size_t i = 0; i < size; ++i) { 
-        value_t n1 = n;
-        n++;
+        value_t n1 = n++;
         delta = value_t(vec[i]) - M1;
         delta_n = delta / n;
         delta_n2 = delta_n * delta_n;
         term1 = delta * delta_n * n1;
         M1 += delta_n;
-        M4 += term1 * delta_n2 * (n*n - 3*n + 3) + 6 * delta_n2 * M2 - 4 * delta_n * M3;
+        M4 += term1 * delta_n2 * (n * n - 3 * n + 3) + 6 * delta_n2 * M2 - 4 * delta_n * M3;
         M3 += term1 * delta_n * (n - 2) - 3 * delta_n * M2;
         M2 += term1;
     }
@@ -245,23 +244,24 @@ public:
     }
 
     void add_observation(size_t hour, size_t site, const int* vec, size_t size, value_t event) {
-//        std::vector<value_t> vec(&raw_data[0], &raw_data[size]);
-
         size_t s_size = (1 + features_size) * sizeof(value_t);
         size_t h_size = sites * s_size;
         value_t* features = &data.get()[hour * h_size + site * s_size];
 
         features[0] = event;
         features[1] = 1.;   // always 1.
+        //features[2] = time 
 
         size_t beg = 0;
         size_t vec_size = size / 3;
 
-        stat::get_stat_online(&vec[beg], vec_size, features[3], features[4], features[5], features[6]);
+        size_t offset = 3;
+
+        stat::get_stat_online(&vec[beg], vec_size, features[offset + 0], features[offset + 1], features[offset + 2], features[offset + 3]);
         beg += vec_size;
-        stat::get_stat_online(&vec[beg], vec_size, features[7], features[8], features[9], features[10]);
+        stat::get_stat_online(&vec[beg], vec_size, features[offset + 4], features[offset + 5], features[offset + 6], features[offset + 7]);
         beg += vec_size;
-        stat::get_stat_online(&vec[beg], vec_size, features[11], features[12], features[13], features[14]);
+        stat::get_stat_online(&vec[beg], vec_size, features[offset + 8], features[offset + 9], features[offset + 10], features[offset + 11]);
     }
 
 
