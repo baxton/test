@@ -1,6 +1,7 @@
 
 //
 //  g++ -DTESTS --std=c++0x -W -Wall -Wno-sign-compare -O2 -s -pipe -mmmx -msse -msse2 -msse3 proto.cpp -o proto.exe
+//  g++ -DEMUL --std=c++0x -W -Wall -Wno-sign-compare -O2 -s -pipe -mmmx -msse -msse2 -msse3 proto.cpp -o proto.exe
 //
 
 
@@ -14,8 +15,9 @@
 #include <iterator>
 #include <memory>
 
-#if defined TESTS
+#if defined(TESTS) || defined(EMUL)
 #    include <iostream>
+#    include <string>
 #endif
 
 
@@ -470,11 +472,92 @@ int main() {
 
 
 
+// ----------------------------------------------
+// Running under emulator
+// ----------------------------------------------
+
+
+#if defined EMUL
+
+int main() {
+
+    std::string line;
+
+    std::getline(std::cin, line);
+    int rate = std::atoi(line.c_str());
+
+    std::getline(std::cin, line);
+    int S = std::atoi(line.c_str());
+
+    std::getline(std::cin, line);
+    int SLEN = std::atoi(line.c_str());
+
+    std::vector<double> sitesData;
+    for (int i = 0; i < SLEN; ++i) {
+        std::getline(std::cin, line);
+        double d = std::atof(line.c_str());
+        sitesData.push_back(d);
+    }
+
+
+
+    QuakePredictor qp;
+    int ret = qp.init(rate, S, sitesData);
+    std::cout << ret << std::endl;
+
+
+    std::getline(std::cin, line);
+    int doTraining = std::atoi(line.c_str());
+
+    if (1 == doTraining) {
+        ;
+    }
+
+
+    while(std::getline(std::cin, line)) {
+        int hour = std::atoi(line.c_str());
+        if (-1 == hour) break;
+
+        std::getline(std::cin, line);
+        int DLEN = std::atoi(line.c_str());
+
+        std::vector<int> data;
+        for (int i = 0; i < DLEN; ++i) {
+            std::getline(std::cin, line);
+            int d = std::atoi(line.c_str());
+            data.push_back(d);
+        }
+
+        std::getline(std::cin, line);
+        int K = std::atoi(line.c_str());
+
+        std::getline(std::cin, line);
+        int QLEN = std::atoi(line.c_str());
+
+        std::vector<double> globalQuakes;
+        for (int i = 0; i < QLEN; ++i) {
+            std::getline(std::cin, line);
+            double d = std::atof(line.c_str());
+            globalQuakes.push_back(d);
+        }
+
+
+        std::vector<double> retM = qp.forecast(hour, data, K, globalQuakes);
+        std::cout << retM.size() << std::endl;
+
+        for (int i = 0; i < retM.size(); ++i) {
+            std::cout << retM[i] << std::endl;
+        }
+    }
+
+    return 0;
+}
 
 
 
 
 
+#endif
 
 
 
