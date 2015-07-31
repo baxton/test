@@ -12,6 +12,7 @@
 #include <vector>
 #include <algorithm>
 #include <iterator>
+#include <memory>
 
 #if defined TESTS
 #    include <iostream>
@@ -161,12 +162,16 @@ value_t predict(const value_t* theta, const value_t* x, int columns) {
 class QuakePredictor {
 
 
-    int rate;
-    int sites;
+    size_t rate;
+    size_t sites;
     std::vector<value_t> sitesLocations;
 
     size_t columns;
     std::vector<value_t> theta;
+
+
+    size_t features_size;
+    std::auto_ptr<value_t> data;
 
 
     QuakePredictor(const QuakePredictor&);
@@ -178,10 +183,13 @@ public:
         sites(0),
         sitesLocations(),
         columns(0),
-        theta()
+        theta(),
+        features_size(0),
+        data(NULL)
     {
         rnd::seed();
     }
+
     ~QuakePredictor() {}
 
 
@@ -216,12 +224,101 @@ public:
         sites = numOfSites;
         std::copy(sitesData.begin(), sitesData.end(), std::back_inserter(sitesLocations));
 
+
+        // allocate memory for data
+        // Format:
+        // [hour #][site #][Y + <14 features>]
+        // 14 features:
+        //    <always 1><hour><mvsk * 3>
+        features_size = 14;
+        size_t total_buffer_size = 2160 * sites * (1 + features_size) * sizeof(value_t);
+        data = std::auto_ptr<value_t>(new value_t[total_buffer_size]);
+
+
         // init classifier
-        columns = 1 + 1 + 4;
-        for (size_t i = 0; i < columns; ++i)
+        for (size_t i = 0; i < features_size; ++i)
             theta.push_back(rnd::rand());
 
         return 0;
+    }
+
+    void add_observation(size_t hour, size_t site, const int* raw_data, size_t size, const std::vector<value_t>& quakes) {
+        std::vector<value_t> vec(&raw_data[0], &raw_data[size]);
+
+        value_t features[1 + features_size];
+
+        features[0] = is_event(sitesLocations[site * 2], sitesLocations[site * 2 + 1], quakes);
+
+        features[1] = 1.;   // always 1.
+
+        size_t beg = 0;
+        size_t vec_size = size / 3;
+
+        stat::get_stat_online(&vec[beg], vec_size, features[3], features[4], features[5], features[6]);
+        beg += vec_size;
+        stat::get_stat_online(&vec[beg], vec_size, features[7], features[8], features[9], features[10]);
+        beg += vec_size;
+        stat::get_stat_online(&vec[beg], vec_size, features[11], features[12], features[13], features[14]);
+
+
+        size_t s_size = (1 + features_size) * sizeof(value_t);
+        size_t h_size = sites * s_size;
+
+        std::copy(&features[0], &features[1 + features_size], &data.get()[hour * h_size + site * s_size]);
+    }
+
+
+
+    void fit_classifier(size_t hour) {
+        size_t s_size = (1 + features_size) * sizeof(value_t);
+        size_t h_size = sites * s_size;
+
+
+        for (size_t h = 0; h <= hour; ++h) {
+            for (size_t s = 0; s < sites; ++s) {
+                value_t y = data.get()[hour * h_size + s * s_size];   // TODO move out of the loop
+                value_t* x = &data.get()[h * h_size + s * s_size + 1];
+
+                x[1] = hour - h; 
+
+                optimize::minimize_gc(&theta[0], x, features_size, y, 5);
+            }
+        }
+    }
+
+
+
+    void predict(size_t hour, std::vector<double>& predictions) {
+        size_t s_size = (1 + features_size) * sizeof(value_t);
+        size_t h_size = sites * s_size;
+
+        for (size_t s = 0; s < sites; ++s) {
+            value_t* x = &data.get()[hour * h_size + s * s_size + 1];
+
+            for (size_t h = hour; h < 2160; ++h) {
+                x[1] = h - hour;
+                value_t p = optimize::predict(&theta[0], x, features_size);
+                predictions[h * sites + s] = p;
+            }
+        }
+    }
+
+
+    std::vector<double> forecast(int hour, const std::vector<int>& data, double K, const std::vector<double>& globalQuakes) {
+        size_t return_size = sites * 2160;
+        std::vector<double> predictions(return_size, 0.);
+
+        for (size_t s = 0; s < sites; ++s) {
+            size_t beg = s * rate * 3600 * 3;
+            size_t size = rate * 3600 * 3;
+
+            add_observation(hour, s, &data[beg], size, globalQuakes);
+        }
+
+        fit_classifier(hour);
+        predict(hour, predictions);
+
+        return predictions;
     }
 
 
@@ -315,19 +412,63 @@ void test4() {
 }
 
 
+
+void test5() {
+    size_t rate = 30;
+    size_t sites = 2;
+
+    std::vector<int> data;
+    std::vector<double> locations;
+    std::vector<double> quakes;
+
+    //
+    locations.push_back(37.6156);
+    locations.push_back(55.7522);
+    locations.push_back(103.8);
+    locations.push_back(1.3667);
+
+    quakes.push_back(37.);
+    quakes.push_back(55.);
+    quakes.push_back(1);
+    quakes.push_back(3);
+    quakes.push_back(0);
+
+    for (size_t s = 0; s < sites; ++s) {
+        for (size_t r = 0; r < (rate * 3600 * 3); ++r) {
+            data.push_back((int)(100. * rnd::rand()));
+        }
+    }
+
+    QuakePredictor qp;
+    {
+        qp.init(rate, sites, locations);
+ 
+        std::vector<double> p1 = qp.forecast(0, data, 2, quakes);
+        std::vector<double> p2 = qp.forecast(1, data, 3, quakes);
+    
+        std::cout << "p1 size: " << p1.size() << std::endl;
+        std::cout << "p2 size: " << p2.size() << std::endl;
+
+    }
+
+    std::cout << "test5 done" << std::endl;
+}
+
+
 int main() {
 
     test();
     test2();
     test3();
     test4();
-
+    test5();
 
     return 0;
 }
 
 
 #endif
+
 
 
 
