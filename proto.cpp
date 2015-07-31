@@ -58,7 +58,9 @@ void mul_and_add(value_t scalar, const value_t* v, value_t* r, int size) {
 
 namespace stat {
 
-void get_stat_online(const value_t* vec, size_t size, value_t& m, value_t& v, value_t& s, value_t& k) {
+
+template<typename T>
+void get_stat_online(const T* vec, size_t size, value_t& m, value_t& v, value_t& s, value_t& k) {
     value_t n, M1, M2, M3, M4;
     double delta, delta_n, delta_n2, term1;
 
@@ -69,7 +71,7 @@ void get_stat_online(const value_t* vec, size_t size, value_t& m, value_t& v, va
     for (size_t i = 0; i < size; ++i) { 
         value_t n1 = n;
         n++;
-        delta = vec[i] - M1;
+        delta = value_t(vec[i]) - M1;
         delta_n = delta / n;
         delta_n2 = delta_n * delta_n;
         term1 = delta * delta_n * n1;
@@ -242,13 +244,14 @@ public:
         return 0;
     }
 
-    void add_observation(size_t hour, size_t site, const int* raw_data, size_t size, const std::vector<value_t>& quakes) {
-        std::vector<value_t> vec(&raw_data[0], &raw_data[size]);
+    void add_observation(size_t hour, size_t site, const int* vec, size_t size, value_t event) {
+//        std::vector<value_t> vec(&raw_data[0], &raw_data[size]);
 
-        value_t features[1 + features_size];
+        size_t s_size = (1 + features_size) * sizeof(value_t);
+        size_t h_size = sites * s_size;
+        value_t* features = &data.get()[hour * h_size + site * s_size];
 
-        features[0] = is_event(sitesLocations[site * 2], sitesLocations[site * 2 + 1], quakes);
-
+        features[0] = event;
         features[1] = 1.;   // always 1.
 
         size_t beg = 0;
@@ -259,12 +262,6 @@ public:
         stat::get_stat_online(&vec[beg], vec_size, features[7], features[8], features[9], features[10]);
         beg += vec_size;
         stat::get_stat_online(&vec[beg], vec_size, features[11], features[12], features[13], features[14]);
-
-
-        size_t s_size = (1 + features_size) * sizeof(value_t);
-        size_t h_size = sites * s_size;
-
-        std::copy(&features[0], &features[1 + features_size], &data.get()[hour * h_size + site * s_size]);
     }
 
 
@@ -295,8 +292,8 @@ public:
         for (size_t s = 0; s < sites; ++s) {
             value_t* x = &data.get()[hour * h_size + s * s_size + 1];
 
-            for (size_t h = hour; h < 2160; ++h) {
-                x[1] = h - hour;
+            for (size_t h = 0; h < 2160; ++h) {
+                x[1] = h;
                 value_t p = optimize::predict(&theta[0], x, features_size);
                 predictions[h * sites + s] = p;
             }
@@ -312,7 +309,8 @@ public:
             size_t beg = s * rate * 3600 * 3;
             size_t size = rate * 3600 * 3;
 
-            add_observation(hour, s, &data[beg], size, globalQuakes);
+            value_t event = is_event(sitesLocations[s*2], sitesLocations[s*2 + 1], globalQuakes);
+            add_observation(hour, s, &data[beg], size, event);
         }
 
         fit_classifier(hour);
