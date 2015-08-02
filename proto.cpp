@@ -16,6 +16,7 @@
 #include <memory>
 
 #if defined(TESTS) || defined(EMUL)
+#    include <fstream>
 #    include <iostream>
 #    include <string>
 #endif
@@ -50,7 +51,7 @@ value_t dot(const value_t* v1, const value_t* v2, int size) {
 
 void mul_and_add(value_t scalar, const value_t* v, value_t* r, int size) {
     for (int i = 0; i < size; ++i) {
-        r[i] += v[i] * scalar;
+        r[i] = v[i] * scalar;
     }
 }
 
@@ -128,7 +129,7 @@ void minimize_gc(value_t* theta, const value_t* x, int columns, const value_t y,
     value_t grad[columns];
 
     value_t e = 0.0001;
-    value_t a = .4;
+    value_t a = .8;
 
     value_t cost = logistic_cost(theta, x, grad, y, columns);
 
@@ -176,6 +177,8 @@ class QuakePredictor {
     size_t features_size;
     std::auto_ptr<value_t> data;
 
+    std::vector<double> predictions;
+
 
     QuakePredictor(const QuakePredictor&);
     QuakePredictor& operator=(const QuakePredictor&);
@@ -188,7 +191,8 @@ public:
         columns(0),
         theta(),
         features_size(0),
-        data(NULL)
+        data(NULL),
+        predictions()
     {
         rnd::seed();
     }
@@ -208,13 +212,14 @@ public:
 
 
     value_t is_event(value_t lat, value_t lon, const std::vector<value_t>& quakes) {
-        value_t MAX_DIST = 70.;
+        value_t MAX_DIST = 100.;
 
         size_t count = 0;
         size_t size = quakes.size() / 5;
 
         for (size_t i = 0; i < size; ++i) {
             value_t dist = distance(lat, lon, quakes[i * 5], quakes[i * 5 + 1]);
+log() << ">>" << dist << std::endl;
             count += dist <= MAX_DIST;
         }
 
@@ -238,9 +243,14 @@ public:
         data = std::auto_ptr<value_t>(new value_t[total_buffer_size]);
 
 
+        size_t return_size = sites * 2160;
+        for (size_t i = 0; i < return_size; ++i)
+            predictions.push_back(0.);
+
+
         // init classifier
         for (size_t i = 0; i < features_size; ++i)
-            theta.push_back(rnd::rand());
+            theta.push_back(rnd::rand() - .5);
 
         return 0;
     }
@@ -278,25 +288,26 @@ public:
                 value_t y = data.get()[hour * h_size + s * s_size];   // TODO move out of the loop
                 value_t* x = &data.get()[h * h_size + s * s_size + 1];
 
-                x[1] = hour - h; 
+                x[1] = value_t(hour - h) / 2160.; 
 
-                optimize::minimize_gc(&theta[0], x, features_size, y, 5);
+                optimize::minimize_gc(&theta[0], x, features_size, y, 1);
             }
         }
     }
 
 
 
-    void predict(size_t hour, std::vector<double>& predictions) {
+    void predict(size_t hour) {
         size_t s_size = (1 + features_size) * sizeof(value_t);
         size_t h_size = sites * s_size;
 
         for (size_t s = 0; s < sites; ++s) {
             value_t* x = &data.get()[hour * h_size + s * s_size + 1];
 
-            for (size_t h = 0; h < 2160; ++h) {
-                x[1] = h;
+            for (size_t h = hour; h < 2160; ++h) {
+                x[1] = value_t(h - hour) / 2160;
                 value_t p = optimize::predict(&theta[0], x, features_size);
+                p = .1;
                 predictions[h * sites + s] = p;
             }
         }
@@ -304,19 +315,20 @@ public:
 
 
     std::vector<double> forecast(int hour, const std::vector<int>& data, double K, const std::vector<double>& globalQuakes) {
-        size_t return_size = sites * 2160;
-        std::vector<double> predictions(return_size, 0.);
 
         for (size_t s = 0; s < sites; ++s) {
             size_t beg = s * rate * 3600 * 3;
             size_t size = rate * 3600 * 3;
 
             value_t event = is_event(sitesLocations[s*2], sitesLocations[s*2 + 1], globalQuakes);
+log() << "hour " << hour << " site " << s << " [" << sitesLocations[s*2] << ", " << sitesLocations[s*2
++1] << "]" << " event " << event << std::endl;
             add_observation(hour, s, &data[beg], size, event);
         }
 
-        fit_classifier(hour);
-        predict(hour, predictions);
+        for (size_t h = 0; h <= hour; ++h)
+            fit_classifier(h);
+        predict(hour);
 
         return predictions;
     }
@@ -328,6 +340,12 @@ public:
     //
 
     const std::vector<value_t>& get_theta() { return theta; }
+
+    static std::ostream& log() {
+        static std::ofstream f("quake.log", std::ios_base::out | std::ios_base::trunc);
+
+        return f;
+    }
 };
 
 
