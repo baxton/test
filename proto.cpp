@@ -49,7 +49,7 @@ value_t dot(const value_t* v1, const value_t* v2, int size) {
     return r;
 }
 
-void mul_and_add(value_t scalar, const value_t* v, value_t* r, int size) {
+void mul_scalar(value_t scalar, const value_t* v, value_t* r, int size) {
     for (int i = 0; i < size; ++i) {
         r[i] = v[i] * scalar;
     }
@@ -119,7 +119,7 @@ value_t logistic_cost(const value_t* theta, const value_t* x, value_t* grad_x, v
 
     // calc gradient part
     value_t delta = h - y;
-    linalg::mul_and_add(delta, x, grad_x, columns);
+    linalg::mul_scalar(delta, x, grad_x, columns);
 
     return cost;
 }
@@ -161,7 +161,7 @@ value_t predict(const value_t* theta, const value_t* x, int columns) {
 }
 
 
-
+const size_t theta_num = 10;
 
 class QuakePredictor {
 
@@ -171,7 +171,8 @@ class QuakePredictor {
     std::vector<value_t> sitesLocations;
 
     size_t columns;
-    std::vector<value_t> theta;
+    std::vector<value_t> theta[theta_num];
+    std::vector<value_t> theta2;
 
 
     size_t features_size;
@@ -189,7 +190,7 @@ public:
         sites(0),
         sitesLocations(),
         columns(0),
-        theta(),
+        //theta(),
         features_size(0),
         data(NULL),
         predictions()
@@ -212,18 +213,26 @@ public:
 
 
     value_t is_event(value_t lat, value_t lon, const std::vector<value_t>& quakes) {
-        value_t MAX_DIST = 100.;
+        value_t MAX_DIST = 1000.;
 
         size_t count = 0;
         size_t size = quakes.size() / 5;
 
+        value_t score = 0.;
+
         for (size_t i = 0; i < size; ++i) {
             value_t dist = distance(lat, lon, quakes[i * 5], quakes[i * 5 + 1]);
+#if defined EMUL
 log() << ">>" << dist << std::endl;
+#endif
             count += dist <= MAX_DIST;
-        }
 
-        return count ? 1. : 0.;
+            score += .75 * (50. / dist)*(50. / dist) ; //+ .05 *  quakes[i * 5 + 3] + 1. / quakes[i * 5 + 2] + .01 * (dist <= MAX_DIST);
+        }
+#if defined EMUL
+std::cerr << ">>" << (size ? score / size : 0.) << std::endl;
+#endif
+        return (size ? score / size : 0.);
     }
 
 
@@ -235,11 +244,11 @@ log() << ">>" << dist << std::endl;
 
         // allocate memory for data
         // Format:
-        // [hour #][site #][Y + <14 features>]
-        // 14 features:
-        //    <always 1><hour><mvsk * 3>
-        features_size = 14;
-        size_t total_buffer_size = 2160 * sites * (1 + features_size) * sizeof(value_t);
+        // [hour #][site #][Y + <17 features>]
+        // 17 features:
+        //    <always 1><hour><hour^2><hour^3><activity><mvsk * 3>
+        features_size = 17;
+        size_t total_buffer_size = 2160 * sites * (1 + features_size);
         data = std::auto_ptr<value_t>(new value_t[total_buffer_size]);
 
 
@@ -249,25 +258,31 @@ log() << ">>" << dist << std::endl;
 
 
         // init classifier
-        for (size_t i = 0; i < features_size; ++i)
-            theta.push_back(rnd::rand() - .5);
+        for (size_t i = 0; i < features_size; ++i) {
+            for (size_t t = 0; t < theta_num; ++t) {
+                theta[t].push_back(rnd::rand() );
+            }
+        }
 
         return 0;
     }
 
-    void add_observation(size_t hour, size_t site, const int* vec, size_t size, value_t event) {
-        size_t s_size = (1 + features_size) * sizeof(value_t);
+    void add_observation(size_t hour, size_t site, const int* vec, size_t size, value_t event, value_t K) {
+        size_t s_size = (1 + features_size);
         size_t h_size = sites * s_size;
         value_t* features = &data.get()[hour * h_size + site * s_size];
 
         features[0] = event;
         features[1] = 1.;   // always 1.
         //features[2] = time 
+        //features[3] = time^2
+        //features[4] = time^3
+        features[5] = K;
 
         size_t beg = 0;
         size_t vec_size = size / 3;
 
-        size_t offset = 3;
+        size_t offset = 6;
 
         stat::get_stat_online(&vec[beg], vec_size, features[offset + 0], features[offset + 1], features[offset + 2], features[offset + 3]);
         beg += vec_size;
@@ -279,7 +294,7 @@ log() << ">>" << dist << std::endl;
 
 
     void fit_classifier(size_t hour) {
-        size_t s_size = (1 + features_size) * sizeof(value_t);
+        size_t s_size = (1 + features_size);
         size_t h_size = sites * s_size;
 
 
@@ -288,9 +303,13 @@ log() << ">>" << dist << std::endl;
                 value_t y = data.get()[hour * h_size + s * s_size];   // TODO move out of the loop
                 value_t* x = &data.get()[h * h_size + s * s_size + 1];
 
-                x[1] = value_t(hour - h) / 2160.; 
+                value_t t = value_t(hour - h) / 2160.; 
+                x[1] = t;
+                x[2] = t * t;
+                x[3] = t * t * t;
 
-                optimize::minimize_gc(&theta[0], x, features_size, y, 1);
+                for (size_t t = 0; t < theta_num; ++t)
+                    optimize::minimize_gc(&theta[t][0], x, features_size, y, 1);
             }
         }
     }
@@ -298,17 +317,27 @@ log() << ">>" << dist << std::endl;
 
 
     void predict(size_t hour) {
-        size_t s_size = (1 + features_size) * sizeof(value_t);
+        size_t s_size = (1 + features_size);
         size_t h_size = sites * s_size;
 
         for (size_t s = 0; s < sites; ++s) {
             value_t* x = &data.get()[hour * h_size + s * s_size + 1];
 
             for (size_t h = hour; h < 2160; ++h) {
-                x[1] = value_t(h - hour) / 2160;
-                value_t p = optimize::predict(&theta[0], x, features_size);
-                p = .1;
-                predictions[h * sites + s] = p;
+                value_t t = value_t(h - hour) / 2160;
+                x[1] = t;
+                x[2] = t * t;
+                x[3] = t * t * t;
+
+                value_t p = 0.;
+                for (size_t t = 0; t < theta_num; ++t) {
+                    value_t tmp = optimize::predict(&theta[t][0], x, features_size);
+                    p += tmp;
+                }
+ 
+                p /= theta_num;
+                value_t mul = 1.; //predictions[h * sites + s] > p ? .9 : 1.;
+                predictions[h * sites + s] = p * mul;
             }
         }
     }
@@ -316,18 +345,43 @@ log() << ">>" << dist << std::endl;
 
     std::vector<double> forecast(int hour, const std::vector<int>& data, double K, const std::vector<double>& globalQuakes) {
 
-        for (size_t s = 0; s < sites; ++s) {
-            size_t beg = s * rate * 3600 * 3;
-            size_t size = rate * 3600 * 3;
+        if (0 < globalQuakes.size()) {
 
-            value_t event = is_event(sitesLocations[s*2], sitesLocations[s*2 + 1], globalQuakes);
+            std::vector<value_t> scores;
+            for (size_t s = 0; s < sites; ++s) {
+                scores.push_back(is_event(sitesLocations[s*2], sitesLocations[s*2 + 1], globalQuakes));
+            }
+            value_t m, v, s, k;
+            stat::get_stat_online(&scores[0], sites, m, v, s, k);
+#if defined EMUL
+std::cerr << "mvsk: " << m << " " << v << " " << s << " " << k << std::endl;
+#endif
+
+            if (s <= 2. && -2. <= k && k <= 2. && !(1.8 <= s && s <= 2.1 && 1.8 <= k && k <= 2.1)) {
+
+                for (size_t s = 0; s < sites; ++s) {
+                    size_t beg = s * rate * 3600 * 3;
+                    size_t size = rate * 3600 * 3;
+
+                    value_t event = scores[s] < (m > .0002 ? .0001 : m * 3) ? 1. : 0.;
+#if defined EMUL
 log() << "hour " << hour << " site " << s << " [" << sitesLocations[s*2] << ", " << sitesLocations[s*2
 +1] << "]" << " event " << event << std::endl;
-            add_observation(hour, s, &data[beg], size, event);
-        }
+#endif
+                    add_observation(hour, s, &data[beg], size, event, K);
+                }
 
-        for (size_t h = 0; h <= hour; ++h)
-            fit_classifier(h);
+                size_t epoches = hour < 10 ? 10 : 50;
+                if (0 <= s && s <= 1.6 && .5 <= k && k <= 1.9)
+                    epoches = 150;
+
+                for (size_t e = 0; e < epoches; ++e) {
+                    for (size_t h = 0; h <= hour; ++h)
+                        fit_classifier(h);
+                }
+
+            }
+        }
         predict(hour);
 
         return predictions;
@@ -339,13 +393,14 @@ log() << "hour " << hour << " site " << s << " [" << sitesLocations[s*2] << ", "
     // for debugging
     //
 
-    const std::vector<value_t>& get_theta() { return theta; }
-
+//    const std::vector<value_t>& get_theta() { return theta; }
+#if defined EMUL
     static std::ostream& log() {
         static std::ofstream f("quake.log", std::ios_base::out | std::ios_base::trunc);
 
         return f;
     }
+#endif
 };
 
 
@@ -576,6 +631,7 @@ int main() {
 
 
 #endif
+
 
 
 
