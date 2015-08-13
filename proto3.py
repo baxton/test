@@ -195,7 +195,8 @@ def test(c_t0, c_t1, c_t2, fname):
         r += 1
         if 0 == (r % 1500):
             print "Step %d" % (r,)
-            print "intermed auc", roc_auc_score(y_true, predictions[:-2])
+            if np.unique(y_true).shape[0] > 1:
+                print "intermed auc", roc_auc_score(y_true, predictions[:-2])
 
     predictions = predictions[:-2]
 
