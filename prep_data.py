@@ -11,9 +11,10 @@ from array import array
 
 def save_array(src, file_name):
     with open(file_name, "wb+") as fout:
-        src = src.T
-        for i in range(src.shape[0]):
-            a = array('f', src[i,:])
+        print len(src), len(src[1])
+        R = len(src)
+        for r in range(R):
+            a = array('f', src[r])
             a.tofile(fout)
      
 
@@ -28,34 +29,66 @@ def process(subj_no):
 
 
 
-        events = np.array([], dtype=np.float32).reshape((0, 6))
-        data = np.array([], dtype=np.float32).reshape((0, 32))
+        events = []
+        for i in range(6):
+            events.append([])
+
+        data = []
+        for i in range(32):
+            data.append([])
+
+        cnt = 0
 
         with open(events_file, "r") as fin:
             fin.readline()      # skip header
-            row = None
             for line in fin:
+                cnt += 1
                 tokens = line.strip().split(",")
-                row = np.array([float(v) for v in tokens[1:]], dtype=np.float32)
-                events = np.concatenate((events, row.reshape((1, 6))), axis=0)
+                for i in range(6):
+                    events[i].append(float(tokens[i+1]))
+        print "read", cnt, "rows"
         save_array(events, events_file + ".bin")
         events = None
     
 
         with open(train_file, "r") as fin:
             fin.readline()      # skip header
-            row = None
             for line in fin:
                 tokens = line.strip().split(",")
-                row = np.array([float(v) for v in tokens[1:]], dtype=np.float32)
-                data = np.concatenate((data, row.reshape((1, 32))), axis=0)
+                for i in range(32):
+                    data[i].append(float(tokens[i+1]))
         save_array(data, train_file + ".bin")
         data = None
+    # end of for 1-9
 
 
 
 
 
+
+
+def process_test(subj_no):
+    for ser_no in [9, 10]:
+        train_file = '../data/test/subj%d_series%d_data.csv' % (subj_no, ser_no)
+
+        print "Processing in test: %d, %d" % (subj_no, ser_no)
+
+
+        data = []
+        for i in range(32):
+            data.append([])
+
+        cnt = 0
+
+        with open(train_file, "r") as fin:
+            fin.readline()  
+            for line in fin:
+                tokens = line.strip().split(",")
+                for i in range(32):
+                    data[i].append(float(tokens[i+1]))
+        save_array(data, train_file + ".bin")
+        data = None
+    # end of for 1-9
 
 
 
@@ -65,7 +98,8 @@ def process(subj_no):
 
 def main():
     subj_no = int(sys.argv[1])
-    process(subj_no)
+    #process(subj_no)
+    process_test(subj_no)
 
 
 
@@ -74,3 +108,4 @@ def main():
 
 
 main()
+
