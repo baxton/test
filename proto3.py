@@ -12,6 +12,8 @@ from sklearn.ensemble import RandomForestClassifier
 
 from sklearn.metrics import roc_auc_score
 
+from ann import ANN
+
 from utils import *
 
 
@@ -27,13 +29,18 @@ COLS = 1201
 
 FNAME = ""
 
-EPOCHES = 100
-MINI_BATCH_SIZE = 100
+EPOCHES = 5
+MINI_BATCH_SIZE = 500
 
 MIN = 0
 MAX = 0
 
 
+
+TRAIN_POS = 0
+TRAIN_NEG = 0
+TEST_POS = 0
+TEST_NEG = 0
 
 
 def sigmoid(v):
@@ -185,29 +192,53 @@ def train_sgd():
     data[:,:-3] /= div
 
 
+    global TRAIN_POS, TRAIN_NEG
+    TRAIN_POS = (data[:,-3] == 1).sum()
+    TRAIN_NEG = (data[:,-3] == 0).sum()
 
 
     loss = "log"
     #loss = "modified_huber"
-    c_t0 = SGDClassifier(loss, n_iter=5)
-    c_t1 = SGDClassifier(loss, n_iter=5)
-    c_t2 = SGDClassifier(loss, n_iter=5)
+#    c_t0 = SGDClassifier(loss, n_iter=5)
+#    c_t1 = SGDClassifier(loss, n_iter=5)
+#    c_t2 = SGDClassifier(loss, n_iter=5)
 
-    indices = range(ROWS)
+    c_t0 = ANN([data.shape[1] - 3, 2000, 1])
+#    c_t1 = ANN([data.shape[1] - 3, 100, 2])
+#    c_t2 = ANN([data.shape[1] - 3, 100, 2])
+
+
+    N = data.shape[0]
+    indices = np.array(range(N))
+    pos = data[:,-3] == 1
+    neg = ~pos
+
+    pos_ii = indices[pos]
+    neg_ii = indices[neg]
+
 
     for e in range(EPOCHES):
-        np.random.shuffle(indices)
-        for_train = indices[:MINI_BATCH_SIZE]
+        np.random.shuffle(pos_ii)
+        np.random.shuffle(neg_ii)
+        for_train = np.concatenate((pos_ii[:MINI_BATCH_SIZE], neg_ii[:MINI_BATCH_SIZE+1]))
 
-        c_t0.partial_fit(data[for_train,:-3], data[for_train,-3], [0, 1])
-        c_t1.partial_fit(data[for_train,:-3], data[for_train,-2], [0, 1])
-        c_t2.partial_fit(data[for_train,:-3], data[for_train,-1], [0, 1])
+#        y0 = np.array([1. - data[for_train,-3], data[for_train,-3]], dtype=np.float64)
+#        y1 = np.array([1. - data[for_train,-2], data[for_train,-2]], dtype=np.float64)
+#        y2 = np.array([1. - data[for_train,-1], data[for_train,-1]], dtype=np.float64)
+
+        y0 = data[for_train,-3]
+#        y1 = data[for_train,-2]
+#        y2 = data[for_train,-1]
+
+        c_t0.partial_fit(data[for_train,:-3], y0, [0, 1])
+#        c_t1.partial_fit(data[for_train,:-3], y1, [0, 1])
+#        c_t2.partial_fit(data[for_train,:-3], y2, [0, 1])
 
         print "Epoch %d out of %d  done" % (e, EPOCHES)
 
     data = None
 
-    return c_t0, c_t1, c_t2
+    return c_t0, None, None  #, c_t1, c_t2
 
 
 def test(c_t0, c_t1, c_t2, fname):
@@ -217,6 +248,8 @@ def test(c_t0, c_t1, c_t2, fname):
 
     y_true = []
     predictions = []
+
+    global TEST_POS, TEST_NEG
 
     r = 0
 
@@ -228,47 +261,47 @@ def test(c_t0, c_t1, c_t2, fname):
 
         y_true.append(event)
 
-        p_t0 = c_t0.predict_proba([tmp])[0,1]
-        p_t1 = c_t1.predict_proba([tmp])[0,1]
-        p_t2 = c_t2.predict_proba([tmp])[0,1]
-
-
-
-
-
-        if 0 == len(predictions):
-            # step 0
-            predictions.append(p_t0)
-            predictions.append(p_t1)
-            predictions.append(p_t2)
-        elif 3 == len(predictions):
-            # step 1
-            predictions[-2] = (predictions[-2] + p_t0) / 2.
-            predictions[-1] = (predictions[-1] + p_t1)
-            predictions.append(p_t2)
+        if event == 1:
+            TEST_POS += 1
         else:
-            # step n
-            predictions[-2] = (predictions[-2] + p_t0) / 3.
-            predictions[-1] = (predictions[-1] + p_t1)
-            predictions.append(p_t2)
+            TEST_NEG += 1
 
-            #print event, predictions[-2]
+        p_t0 = c_t0.predict_proba([tmp])
+#        print event, p_t0
+#        p_t1 = c_t1.predict_proba([tmp])[0,1]
+#        p_t2 = c_t2.predict_proba([tmp])[0,1]
+
+
+        p_t0 = p_t0[0,1] / (p_t0[0,0] + p_t0[0,1]);
+	predictions.append(p_t0)
+
+
+#        if 0 == len(predictions):
+#            # step 0
+#            predictions.append(p_t0)
+#            predictions.append(p_t1)
+#            predictions.append(p_t2)
+#        elif 3 == len(predictions):
+#            # step 1
+#            predictions[-2] = (predictions[-2] + p_t0) / 2.
+#            predictions[-1] = (predictions[-1] + p_t1)
+#            predictions.append(p_t2)
+#        else:
+#            # step n
+#            predictions[-2] = (predictions[-2] + p_t0) / 3.
+#            predictions[-1] = (predictions[-1] + p_t1)
+#            predictions.append(p_t2)
+#
+#            #print event, predictions[-2]
 
 
         r += 1
         if 0 == (r % 1500):
             print "Step %d" % (r,)
             if np.unique(y_true).shape[0] > 1:
-                print "intermed auc", roc_auc_score(y_true, predictions[:-2])
+                print "intermed auc", roc_auc_score(y_true, predictions)
 
-    predictions = predictions[:-2]
-    #morfo(predictions)
-    #morfo(predictions)
-    #morfo(predictions)
-    #morfo(predictions)
-    #morfo(predictions)
-    #morfo(predictions)
-    #morfo(predictions)
+#    predictions = predictions[:-2]
 
 
 
@@ -294,6 +327,11 @@ def main():
     c_t0, c_t1, c_t2 = train_sgd()
     #c_t0, c_t1, c_t2 = train()
     test(c_t0, c_t1, c_t2, fname_test)
+
+    print "POS:", TRAIN_POS
+    print "NEG:", TRAIN_NEG
+    print "Test POS:", TEST_POS
+    print "Test NEG:", TEST_NEG
 
 
 main()
