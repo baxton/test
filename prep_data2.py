@@ -17,7 +17,7 @@ RATE = 500
 CHANNELS_EVENTS = 6
 CHANNELS_DATA = 32
 
-STEP = 100
+STEP = 10
 
 
 def load(subj, ser, for_submission):
@@ -27,6 +27,9 @@ def load(subj, ser, for_submission):
     if not for_submission:
         fn_events = "subj%d_series%d_events.csv.bin" % (subj, ser)
         fn_data   = "subj%d_series%d_data.csv.bin" % (subj, ser)
+
+        print "loading", fn_events
+        print "loading", fn_data
 
         events = load_raw_data(train_path + fn_events)
         data = load_raw_data(train_path + fn_data)
@@ -46,19 +49,21 @@ def load(subj, ser, for_submission):
 
 
 
-def prep_features(subjs, sers, x_ch, y_ch, fn_pref="data"):
+def prep_features(subj, ser, y_ch, fn_pref="data"):
     rows = 0
     cols = 0
 
-    fn = "./%s_%d_%d_%dx%d.bin" % (fn_pref, x_ch, y_ch, rows, cols)
+    fn = "./%s_%d_%dx%d.bin" % (fn_pref, y_ch, rows, cols)
     with open(fn, "wb+") as fout:
-        for s in range(len(subjs)):
-            data, events = load(subjs[s], sers[s], for_submission=False)
-            data = data[x_ch,:]
-            events = events[y_ch,:]
+        cnt = 0
+        data, events = load(subj, ser, for_submission=False)
+        #data = data[x_ch,:]
+        events = events[y_ch,:]
 
-            for beg in range(WIDTH-1, data.shape[0]-2, STEP):
-                tmp = features(data[beg+1-WIDTH : beg+1], WIDTH, RATE)
+        for beg in range(WIDTH-1, data.shape[1]-2, STEP):
+            if events[beg] == 1 or \
+               (0 == (cnt % 2)):
+                tmp = features2(data, beg+1-WIDTH, beg+1, WIDTH, RATE)
                 y = array('d', [events[beg], events[beg+1], events[beg+2]])
              
                 tmp.tofile(fout)
@@ -66,41 +71,45 @@ def prep_features(subjs, sers, x_ch, y_ch, fn_pref="data"):
 
                 rows += 1
                 cols = len(tmp) + 3
+            cnt += 1
 
-                if 0 == ((beg-WIDTH+1)/10 % 500): 
-                    print "window %d out of %d done..." % (beg, data.shape[0]-1)
-            print "subj %d done..." % s
+            if 0 == ((beg-WIDTH+1)/10 % 500): 
+                print "window %d out of %d done..." % (beg, data.shape[1]-1)
        
-    fn_new = "./%s_%d_%d_%dx%d.bin" % (fn_pref, x_ch, y_ch, rows, cols)
+    fn_new = "./%s_%d_%dx%d.bin" % (fn_pref, y_ch, rows, cols)
     os.rename(fn, fn_new) 
     print rows, cols
     
                 
     
-def prep_for_testing(subj, ser, x_ch, y_ch, fn_pref="test", for_submission=False):
+def prep_for_testing(subj, ser, y_ch, fn_pref="test", for_submission=False):
     rows = 0
     cols = 0
 
-    fn = "./%s_test_%d_%d_%dx%d.bin" % (fn_pref, x_ch, y_ch, rows, cols)
+    fn = "./%s_test_%d_%dx%d.bin" % (fn_pref, y_ch, rows, cols)
     with open(fn, "wb+") as fout:
         data, events = load(subj, ser, for_submission)
-        data = data[x_ch,:]
+#        data = data[x_ch,:]
 
         if not for_submission:
             events = events[y_ch,:]
 
-            for beg in range(WIDTH-1, data.shape[0], 1):
-                tmp = features(data[beg+1-WIDTH : beg+1], WIDTH, RATE)
-                y = array('d', [events[beg]])
+            cnt = 0
 
-                tmp.tofile(fout)
-                y.tofile(fout)
+            for beg in range(WIDTH-1, data.shape[1], 4):
+                if events[beg] == 1 or \
+                   0 == (cnt % 2):
+                    tmp = features2(data, beg+1-WIDTH, beg+1, WIDTH, RATE)
+                    y = array('d', [events[beg]])
+                    tmp.tofile(fout)
+                    y.tofile(fout)
 
-                rows += 1
-                cols = len(tmp) + 1
+                    rows += 1
+                    cols = len(tmp) + 1
+                cnt += 1
 
                 if 0 == ((beg-WIDTH+1)/10 % 500):
-                    print "test wnd %d out of %d done..." % (beg, data.shape[0]-1)
+                    print "test wnd %d out of %d done..." % (beg, data.shape[1]-1)
         else:
             y = array('d', [0])
             for beg in range(WIDTH-1, data.shape[0], 1):
@@ -115,7 +124,7 @@ def prep_for_testing(subj, ser, x_ch, y_ch, fn_pref="test", for_submission=False
                 if 0 == ((beg-WIDTH+1)/10 % 500):
                     print "test wnd %d out of %d done..." % (beg, data.shape[0]-1)
 
-    fn_new = "./%s_test_%d_%d_%dx%d.bin" % (fn_pref, x_ch, y_ch, rows, cols)
+    fn_new = "./%s_test_%d_%dx%d.bin" % (fn_pref, y_ch, rows, cols)
     os.rename(fn, fn_new)
     print rows, cols
 
@@ -144,11 +153,11 @@ def main():
     tmp = range(1, 9)
     tmp.remove(test_ser)
     np.random.shuffle(tmp)
-    ser_ii = tmp[:2]
+    ser = tmp[0]
 
 
-    prep_features([subj, subj], ser_ii, x_ch=x_ch, y_ch=y_ch, fn_pref=fn_pref)
-    prep_for_testing(subj, test_ser, x_ch=x_ch, y_ch=y_ch, fn_pref=fn_pref, for_submission=for_submission)
+    prep_features(subj, ser, y_ch=y_ch, fn_pref=fn_pref)
+    prep_for_testing(subj, test_ser, y_ch=y_ch, fn_pref=fn_pref, for_submission=for_submission)
 
     print "-----------------------"
     print "File name prefix:", fn_pref
