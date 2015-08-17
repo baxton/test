@@ -7,7 +7,7 @@ train_path = data_path + 'train/'
 test_path = data_path + 'test/'
 
 
-WIDTH = 512*4
+WIDTH = 512
 
 
 
@@ -77,6 +77,49 @@ def features(data, width, rate):
     result = np.concatenate((F, F2, FM, FSS, A, AL, P, P2, P2L, PA, PAL, DM, D2, D2L, R, [m, v, s],))
     return array('d', result)
     #return np.array(result, dtype=np.float64)
+
+
+
+
+
+
+def features2(data, beg, end, width, rate):
+
+    result = []
+
+    CH_NUM = 2
+
+    for i in range(CH_NUM):
+        F = np.fft.fft(data[i,beg:end])
+
+        idx = int(40. * width / rate)
+        F = F[:idx]
+        N = F.shape[0]
+
+        A = np.sqrt(F.real**2 + F.imag**2) / N
+        result.extend(A)
+
+        result.extend(F.imag)
+
+        tmp = F.real
+        tmp[tmp==0] = 0.0000001
+        PA = np.arctan(F.imag / tmp)
+        result.extend(PA)
+
+        F = F.real
+        result.extend(F)
+
+        m = data.mean()
+        v = data.var()
+        s = data.std()
+        result.extend([m,v,s])
+
+        for j in range(i+1,CH_NUM):
+            R = np.correlate(data[i,beg:end], data[j,beg:end])
+            result.extend(R)
+
+    return array('d', result)
+
 
 
 
