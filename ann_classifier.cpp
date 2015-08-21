@@ -15,7 +15,7 @@
 #include <ann.hpp>
 
 
-typedef float DATATYPE;
+typedef double DATATYPE;
 
 extern "C" {
 
@@ -40,57 +40,38 @@ extern "C" {
 */
 
 
-    void* ann_create() {
+    void* ann_create(int* vec, int size) {
         ma::random::seed();
-
         std::vector<int> sizes;
-        sizes.push_back(2);
-        sizes.push_back(128);
-        sizes.push_back(128);
-//        sizes.push_back(50);
-//        sizes.push_back(10);
-//        sizes.push_back(10);
-//        sizes.push_back(10);
-//        sizes.push_back(128);
-//        sizes.push_back(128);
-//        sizes.push_back(128);
-        sizes.push_back(3);
+        for (int i = 0; i < size; ++i)
+            sizes.push_back(vec[i]);
 
         ma::ann_leaner<DATATYPE>* ann = new ma::ann_leaner<DATATYPE>(sizes);
         return ann;
     }
 
 
-    void ann_fit(void* ann, const DATATYPE* X, const DATATYPE* Y, int rows, DATATYPE* alpha, DATATYPE lambda, int epoches) {
+    void ann_fit(void* ann, const DATATYPE* X, const DATATYPE* Y, int rows, DATATYPE* alpha, DATATYPE lambda, int epoches, DATATYPE* cost) {
 
         int cost_cnt = 0;
         DATATYPE prev_cost = 999.;
-        DATATYPE cost = 0;
+
+        vector<DATATYPE> ww, bb;
 
         for (int e = 0; e < epoches; ++e) {
-            cost = static_cast< ma::ann_leaner<DATATYPE>* >(ann)->fit_minibatch(X, Y, rows, *alpha, lambda);
-
-            if (prev_cost < cost) {
-                if (*alpha > 0.01)
-                    *alpha /= 2.;
-            }
-
-            prev_cost = cost;
-
+//            static_cast< ma::ann_leaner<DATATYPE>* >(ann)->save_weights(ww, bb);
+            *cost = static_cast< ma::ann_leaner<DATATYPE>* >(ann)->fit_minibatch(X, Y, rows, *alpha, lambda);
 /*
-            same_cost_cnt += (0.00001 >= ::fabs(prev_cost - cost));
-            if (10 == same_cost_cnt) {
-                *alpha = 7.;
-                same_cost_cnt = 0;
+            if (prev_cost < *cost) {
+                DATATYPE d = *alpha / 100.;
+                *alpha -= d;
+                static_cast< ma::ann_leaner<DATATYPE>* >(ann)->restore_weights(ww, bb);
+            }
+            else {
+                prev_cost = *cost;
             }
 */
-            if (0 < e && 0 == (e % 100))
-                cout << setprecision(16) << cost << " [" << *alpha << "]" << endl;
-            if (*alpha == 0.) {
-                break;
-            }
         }
-        cout << setprecision(16) << cost << " [" << *alpha << "]" << endl;
 
     }
 
@@ -106,6 +87,7 @@ extern "C" {
 
 
 }
+
 
 
 
