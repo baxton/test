@@ -1,125 +1,132 @@
+
+
+import os
+import sys
 import numpy as np
-from array import array
-
-base_path = '../'
-data_path = base_path + 'data/'
-train_path = data_path + 'train/'
-test_path = data_path + 'test/'
+import ctypes
 
 
-WIDTH = 512
+SEP = os.path.sep
 
 
-
-def load_raw_data(fname):
-    with open(fname, "rb") as fin:
-        fin.seek(0,2)
-        file_size = fin.tell()
-        fin.seek(0)
-
-        a = array('f')
-        a.fromfile(fin, file_size / 4)
-    return np.array(a, dtype=np.float32)
+DICOM_DLL = ctypes.cdll.LoadLibrary("dicom.dll")
 
 
-def features(data, width, rate):
+class DICOM(object):
+    def __init__(self):
+        # meta data access offsets
+        self.MDSeriesDescription       = 0
+        self.MDPixelRepresentation     = 1
+        self.MDBitsStored              = 2
+        self.MDBitsAllocated           = 3
+        self.MDColumns                 = 4
+        self.MDRows                    = 5
+        self.MDGender                  = 6
+        self.MDAge                     = 7
+        self.MDLargestPixelValue       = 8
+        self.MDSliceThickness          = 9
+        self.MDFlipAngle               = 10
+        self.MDImagePositionPatient    = 11   # - 13
+        self.MDImageOrientationPatient = 14   # - 19
 
-#    w = np.hamming(data.shape[0])
-#    data *= w
 
-    F = np.fft.fft(data)
+    def fromfile(self, fname):
+        self.fname = fname
 
-    idx = int(40. * width / rate)
-    F = F[:idx]
-    N = F.shape[0]
+        # read row content
+        # print "read file", fname
+        self.buffer = np.fromfile(self.fname, dtype=np.uint8, sep='')
 
-    A = np.sqrt(F.real**2 + F.imag**2) / N
-    AL = np.log(1. + A)
-
-    P  = F.imag
-    P2 = P**2
-    P2L = np.log(1. + P2)
-
-    tmp = F.real
-    tmp[tmp==0] = 0.0000001
-    PA = np.arctan(P / tmp)
-    PAL = np.log(1. + np.abs(PA))
+        # process in C++ and get object's handler
+        self.dicom = ctypes.c_void_p(0)
+        DICOM_DLL.dicom_fromfile(ctypes.c_void_p(self.buffer.ctypes.data), 
+                                 ctypes.c_int(self.buffer.shape[0]),
+                                 ctypes.c_void_p(ctypes.addressof(self.dicom)))
     
 
-    F = F.real
-
-    bins = np.linspace(F.min(), F.max(), 5)
-    tmp = np.histogram(F, bins)[0].astype(np.float64)
-    tmp[tmp==0] = 0.0000001
-    FM = np.histogram(F, bins, weights=F)[0] / tmp
-    
-    F2 = F**2
-    bins = np.linspace(F2.min(), F2.max(), 5)
-    FSS = np.histogram(F2, bins, weights=F2)[0]
-
-    bins = np.linspace(data.min(), data.max(), 5)
-    tmp = np.histogram(data, bins)[0].astype(np.float64)
-    tmp[tmp==0.] = 0.0000001
-    DM = np.histogram(data, bins, weights=data)[0] / tmp
-    
-    m = data.mean()
-    v = data.var()
-    s = data.std()
-
-    N = data.shape[0]
-    R = np.correlate(data, data, mode='full')[-N:] / (v * np.arange(N, 0, -1))
-
-    D2 = data**2
-    #D2[D2 == 0.] = 0.0000001
-    D2L = np.log(1. + D2)
-
-
-    result = np.concatenate((F, F2, FM, FSS, A, AL, P, P2, P2L, PA, PAL, DM, D2, D2L, R, [m, v, s],))
-    return array('d', result)
-    #return np.array(result, dtype=np.float64)
+    def free(self):
+        DICOM_DLL.dicom_free(self.dicom)
+        pass
 
 
 
+    def Rows(self):
+        rows = ctypes.c_int(0)
+        DICOM_DLL.dicom_rows(self.dicom,
+                             ctypes.c_void_p(ctypes.addressof(rows)))
+        return rows.value
+
+
+    def Columns(self):
+        columns = ctypes.c_int(0)
+        DICOM_DLL.dicom_columns(self.dicom,
+                                ctypes.c_void_p(ctypes.addressof(columns)))
+        return columns.value
+
+    def img_buffer(self):
+        img_length = ctypes.c_int(0)
+        null = ctypes.c_void_p(0)
+
+        DICOM_DLL.dicom_buffer(self.dicom,
+                               null,
+                               ctypes.c_void_p(ctypes.addressof(img_length)))
+        buffer = np.zeros((img_length.value,), dtype=np.uint16)
+        DICOM_DLL.dicom_buffer(self.dicom,
+                               ctypes.c_void_p(buffer.ctypes.data),
+                               null)
+        buffer = buffer.reshape((self.Rows(), self.Columns()))
+        return buffer
+
+
+    def img_metadata(self):
+        length = ctypes.c_int(0)
+        null = ctypes.c_void_p(0)
+ 
+        DICOM_DLL.dicom_metadata(self.dicom,
+                                 null,
+                                 ctypes.c_void_p(ctypes.addressof(length)))
+        buffer = np.zeros((length.value,), dtype=np.float64)
+        DICOM_DLL.dicom_metadata(self.dicom,
+                                 ctypes.c_void_p(buffer.ctypes.data),
+                                 null)
+        return buffer
 
 
 
-def features2(data, beg, end, width, rate):
-
-    result = []
-
-    CH_NUM = 2
-
-    for i in range(CH_NUM):
-        F = np.fft.fft(data[i,beg:end])
-
-        idx = int(40. * width / rate)
-        F = F[:idx]
-        N = F.shape[0]
-
-        A = np.sqrt(F.real**2 + F.imag**2) / N
-        result.extend(A)
-
-        result.extend(F.imag)
-
-        tmp = F.real
-        tmp[tmp==0] = 0.0000001
-        PA = np.arctan(F.imag / tmp)
-        result.extend(PA)
-
-        F = F.real
-        result.extend(F)
-
-        m = data.mean()
-        v = data.var()
-        s = data.std()
-        result.extend([m,v,s])
-
-        for j in range(i+1,CH_NUM):
-            R = np.correlate(data[i,beg:end], data[j,beg:end])
-            result.extend(R)
-
-    return array('d', result)
+    def verbose(self, val):
+        DICOM_DLL.dicom_verbose(ctypes.c_int(1 if val else 0))
 
 
 
+        
+
+
+
+
+
+def main():
+    fname = sys.argv[1]
+    dicom = DICOM() 
+    dicom.fromfile(fname)
+    #
+    import matplotlib.pyplot as plt
+    plt.clf()
+    plt.imshow(dicom.img_buffer())
+    plt.show()
+
+    metadata = dicom.img_metadata()
+    print metadata
+    print metadata.shape 
+
+    print "Rows", metadata[dicom.MDRows]
+    print "ImageOrientationPatient", metadata[dicom.MDImageOrientationPatient], metadata[dicom.MDImageOrientationPatient+1], metadata[dicom.MDImageOrientationPatient+2], metadata[dicom.MDImageOrientationPatient+3], metadata[dicom.MDImageOrientationPatient+4], metadata[dicom.MDImageOrientationPatient+5]
+
+    #
+    dicom.free()
+
+
+
+
+if __name__ == "__main__":
+    main()     
 
